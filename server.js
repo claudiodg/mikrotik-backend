@@ -3,78 +3,91 @@ const cors = require('cors');
 const { RouterOSClient } = require('node-routeros');
 
 const app = express();
-app.use(cors()); // Permitir peticiones desde tu frontend en GitHub Pages
+app.use(cors());
 app.use(express.json());
 
-// Configuración de conexión al Router desde variables de entorno (Render)
-const getRouterConfig = () => ({
-    host: process.env.MIKROTIK_HOST,
-    user: process.env.MIKROTIK_USER,
-    password: process.env.MIKROTIK_PASSWORD,
-    port: parseInt(process.env.MIKROTIK_PORT || '8728'),
-    timeout: 5000
-});
-
-// Ruta raíz para probar que la API está viva
 app.get('/', (req, res) => {
-    res.json({ message: 'API MikroTik Backend activa' });
+    res.json({ message: 'API Multi-Router MikroTik Activa' });
 });
 
-// Endpoint principal para consultar métricas reales
-app.get('/api/metrics', async (req, res) => {
-    const config = getRouterConfig();
+// Endpoint que recibe los datos de conexión por body (POST) o query params
+app.post('/api/metrics', async (req, res) => {
+    const { host, user, password, port = 8728 } = req.body;
 
-    if (!config.host || !config.user || !config.password) {
+    if (!host || !user || !password) {
         return res.status(400).json({
             status: 'error',
-            message: 'Faltan configurar las variables de entorno en Render'
+            message: 'Faltan credenciales del router (host, user, password)'
         });
     }
 
-    const client = new RouterOSClient(config);
+    const client = new RouterOSClient({
+        host,
+        user,
+        password,
+        port: parseInt(port),
+        timeout: 5000
+    });
 
     try {
         await client.connect();
 
-        // 1. Obtener recursos del sistema (CPU, memoria, uptime, modelo)
-        const resourceData = await client.menu('/system/resource').print();
-        const sys = resourceData[0] || {};
+        // 1. Recursos del sistema
+        const sys = (await client.menu('/system/resource').print())[0] || {};
+        
+        // 2. Estado de Salud (Temperatura/Voltaje si el hardware lo soporta)
+        let health = {};
+        try {
+            const healthData = await client.menu('/system/health').print();
+            health = healthData[0] || {};
+        } catch (e) { /* Si el router no soporta health, se omite */ }
 
-        // 2. Obtener leases activos de DHCP
+        // 3. Interfaces de Red
+        const interfaces = await client.menu('/interface').print();
+
+        // 4. Clientes DHCP
         const dhcpLeases = await client.menu('/ip/dhcp-server/lease').print();
-        const activeDhcp = dhcpLeases.filter(l => l.status === 'bound').length;
+        const activeDhcp = dhcpLeases.filter(l => l.status === 'bound');
 
-        // 3. Obtener conexiones PPPoE activas
+        // 5. Clientes PPPoE
         const pppoeActive = await client.menu('/interface/pppoe-server/active').print();
+
+        // 6. Colas simples (Queues)
+        const queues = await client.menu('/queue/simple').print();
 
         await client.close();
 
-        // Responder con la estructura esperada por tu frontend
+        // Respuesta dinámica para cualquier router
         res.json({
             status: 'online',
+            identity: sys['board-name'] || 'MikroTik',
+            uptime: sys['uptime'] || 'N/A',
             cpuLoad: parseInt(sys['cpu-load'] || 0),
+            cpuCount: sys['cpu-count'] || 1,
             freeMemoryMb: Math.round(parseInt(sys['free-memory'] || 0) / (1024 * 1024)),
             totalMemoryMb: Math.round(parseInt(sys['total-memory'] || 0) / (1024 * 1024)),
-            boardName: sys['board-name'] || 'MikroTik',
-            uptime: sys['uptime'] || 'N/A',
+            voltage: health['voltage'] ? (health['voltage'] / 10) : null,
+            temperature: health['temperature'] || null,
+            interfacesCount: interfaces.length,
             clients: {
-                total: activeDhcp + pppoeActive.length,
-                dhcp: activeDhcp,
+                total: activeDhcp.length + pppoeActive.length,
+                dhcp: activeDhcp.length,
                 pppoe: pppoeActive.length
-            }
+            },
+            queuesCount: queues.length
         });
 
     } catch (error) {
-        console.error('Error MikroTik:', error.message);
+        console.error('Error al conectar con MikroTik:', error.message);
         res.status(500).json({
             status: 'offline',
-            error: 'No se pudo conectar al MikroTik',
+            error: 'No se pudo establecer conexión con el MikroTik indicado',
             details: error.message
         });
     }
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-    console.log(`Servidor backend corriendo en el puerto ${PORT}`);
+    console.log(`Backend corriendo en puerto ${PORT}`);
 });
