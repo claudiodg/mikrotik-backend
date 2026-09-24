@@ -6,7 +6,7 @@ const app = express();
 app.use(cors()); // Permitir peticiones desde tu frontend en GitHub Pages
 app.use(express.json());
 
-// Configuración de conexión al Router desde variables de entorno
+// Configuración de conexión al Router desde variables de entorno (Render)
 const getRouterConfig = () => ({
     host: process.env.MIKROTIK_HOST,
     user: process.env.MIKROTIK_USER,
@@ -15,7 +15,7 @@ const getRouterConfig = () => ({
     timeout: 5000
 });
 
-// Ruta para probar que el backend funciona
+// Ruta raíz para probar que la API está viva
 app.get('/', (req, res) => {
     res.json({ message: 'API MikroTik Backend activa' });
 });
@@ -36,7 +36,7 @@ app.get('/api/metrics', async (req, res) => {
     try {
         await client.connect();
 
-        // 1. Obtener recursos de sistema (CPU, memoria, uptime, modelo)
+        // 1. Obtener recursos del sistema (CPU, memoria, uptime, modelo)
         const resourceData = await client.menu('/system/resource').print();
         const sys = resourceData[0] || {};
 
@@ -49,7 +49,7 @@ app.get('/api/metrics', async (req, res) => {
 
         await client.close();
 
-        // Responder con estructura limpia para el Frontend
+        // Responder con la estructura esperada por tu frontend
         res.json({
             status: 'online',
             cpuLoad: parseInt(sys['cpu-load'] || 0),
