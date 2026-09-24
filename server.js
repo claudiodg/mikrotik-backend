@@ -1,115 +1,81 @@
 const express = require('express');
 const cors = require('cors');
-const { RouterOSClient } = require('routeros-client');
-
 const app = express();
-const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
 
-// Base de datos en memoria para guardar los MikroTik registrados
-let routers = [];
+// Base de datos temporal en memoria (o array de routers)
+let routers = [
+  {
+    id: "default",
+    name: "MikroTik Principal",
+    host: "192.168.88.1",
+    port: 8728,
+    user: "admin",
+    pass: ""
+  }
+];
 
-// Ruta de prueba
-app.get('/', (req, res) => {
-  res.send('API de Monitoreo MikroTik Activa');
+// 1. Obtener la lista de routers guardados
+app.get('/api/routers', (req, res) => {
+  res.json(routers);
 });
 
-// API: Registrar o actualizar un MikroTik
+// 2. Registrar un nuevo Router MikroTik desde el Panel Admin
 app.post('/api/routers', (req, res) => {
-  const { id, name, host, port, user, password } = req.body;
-  
-  const existingIndex = routers.findIndex(r => r.id === id);
-  const routerData = { 
-    id: id || Date.now().toString(), 
-    name, 
-    host, 
-    port: parseInt(port) || 8728, 
-    user, 
-    password 
+  const { name, host, port, user, pass } = req.body;
+  if (!name || !host) {
+    return res.status(400).json({ error: "Faltan datos obligatorios" });
+  }
+
+  const newRouter = {
+    id: "router-" + Date.now(),
+    name,
+    host,
+    port: port || 8728,
+    user: user || "admin",
+    pass: pass || ""
   };
 
-  if (existingIndex >= 0) {
-    routers[existingIndex] = routerData;
-  } else {
-    routers.push(routerData);
+  routers.push(newRouter);
+  res.status(201).json(newRouter);
+});
+
+// 3. Obtener métricas dinámicas de un router específico por su ID
+app.get('/api/metrics/:id', (req, res) => {
+  const routerId = req.params.id;
+  const router = routers.find(r => r.id === routerId);
+
+  if (!router) {
+    return res.status(404).json({ error: "Router no encontrado" });
   }
 
-  res.json({ success: true, routers: routers.map(r => ({ id: r.id, name: r.name, host: r.host })) });
-});
-
-// API: Listar equipos guardados
-app.get('/api/routers', (req, res) => {
-  res.json(routers.map(r => ({ id: r.id, name: r.name, host: r.host })));
-});
-
-// API: Obtener métricas consolidadas de un equipo específico
-app.get('/api/metrics/:id', async (req, res) => {
-  const router = routers.find(r => r.id === req.params.id);
-  if (!router) return res.status(404).json({ error: 'Router no encontrado' });
-
-  const client = new RouterOSClient({
-    host: router.host,
-    port: router.port,
-    user: router.user,
-    password: router.password,
-    timeout: 5000
+  // Aquí conectas con RouterOS API usando router.host, router.user, router.pass
+  // Por ahora devolvemos la estructura con datos de prueba/simulados
+  res.json({
+    id: router.id,
+    name: router.name,
+    resources: {
+      cpuLoad: Math.floor(Math.random() * 20) + 5,
+      freeMemory: 128,
+      totalMemory: 256,
+      uptime: "3d 12h 04m",
+      boardName: "RB951Ui-2HnD",
+      version: "7.12.1"
+    },
+    traffic: {
+      rxMbps: (Math.random() * 18 + 2).toFixed(1),
+      txMbps: (Math.random() * 6 + 1).toFixed(1)
+    },
+    sessions: {
+      pppActive: 12,
+      dhcpActive: 28
+    }
   });
-
-  try {
-    const api = await client.connect();
-
-    // 1. Recursos (CPU, RAM, Uptime)
-    const resources = await api.write('/system/resource/print');
-    
-    // 2. Sesiones activas (PPP / Hotspot / DHCP Leases)
-    const activePpp = await api.write('/ppp/active/print');
-    const dhcpLeases = await api.write('/ip/dhcp-server/lease/print');
-
-    // 3. Tráfico de interfaces
-    const interfaces = await api.write('/interface/print');
-    
-    // 4. Consumo por subred / Queues
-    const queues = await api.write('/queue/simple/print');
-
-    await client.close();
-
-    const resData = resources[0] || {};
-    res.json({
-      resources: {
-        cpuLoad: parseInt(resData['cpu-load'] || 0),
-        freeMemory: Math.round(parseInt(resData['free-memory'] || 0) / 1024 / 1024),
-        totalMemory: Math.round(parseInt(resData['total-memory'] || 0) / 1024 / 1024),
-        uptime: resData['uptime'] || 'N/A',
-        boardName: resData['board-name'] || 'MikroTik'
-      },
-      sessions: {
-        pppActive: activePpp.length,
-        dhcpActive: dhcpLeases.filter(l => l.status === 'bound').length
-      },
-      interfaces: interfaces.map(i => ({
-        name: i.name,
-        type: i.type,
-        running: i.running === 'true',
-        disabled: i.disabled === 'true',
-        rxByte: parseInt(i['rx-byte'] || 0),
-        txByte: parseInt(i['tx-byte'] || 0)
-      })),
-      queues: queues.map(q => ({
-        name: q.name,
-        target: q.target,
-        rate: q.rate || '0/0'
-      })),
-      health: {
-        pingSuccessRate: 98.5,
-        status: 'OK'
-      }
-    });
-
-  } catch (error) {
-    res.status(500).json({ error: 'Error de conexión con el MikroTik', details: error.message });
-  }
 });
 
-app.listen(PORT, () => console.log(`Servidor de monitoreo ejecutándose en el puerto ${PORT}`));
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => {
+  console.log(`Servidor de monitoreo ejecutándose en el puerto ${PORT}`);
+});
