@@ -6,7 +6,7 @@ const app = express();
 app.use(cors()); // Permitir peticiones desde tu frontend en GitHub Pages
 app.use(express.json());
 
-// Configuración obtenida desde variables de entorno (Render)
+// Configuración de conexión al Router desde variables de entorno
 const getRouterConfig = () => ({
     host: process.env.MIKROTIK_HOST,
     user: process.env.MIKROTIK_USER,
@@ -15,13 +15,19 @@ const getRouterConfig = () => ({
     timeout: 5000
 });
 
-// Endpoint para obtener métricas reales
+// Ruta para probar que el backend funciona
+app.get('/', (req, res) => {
+    res.json({ message: 'API MikroTik Backend activa' });
+});
+
+// Endpoint principal para consultar métricas reales
 app.get('/api/metrics', async (req, res) => {
     const config = getRouterConfig();
 
     if (!config.host || !config.user || !config.password) {
         return res.status(400).json({
-            error: 'Faltan configurar las variables de entorno en Render'
+            status: 'error',
+            message: 'Faltan configurar las variables de entorno en Render'
         });
     }
 
@@ -43,7 +49,7 @@ app.get('/api/metrics', async (req, res) => {
 
         await client.close();
 
-        // Responder con estructura limpia
+        // Responder con estructura limpia para el Frontend
         res.json({
             status: 'online',
             cpuLoad: parseInt(sys['cpu-load'] || 0),
@@ -70,5 +76,5 @@ app.get('/api/metrics', async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`Backend corriendo en puerto ${PORT}`);
+    console.log(`Servidor backend corriendo en el puerto ${PORT}`);
 });
